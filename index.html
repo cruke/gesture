@@ -128,6 +128,7 @@
     background:#141414;
     font-size:12px;
     opacity:.95;
+    height:38px; /* match button height */
   }
 
   input[type="range"]{ flex:1; min-width:190px; }
@@ -156,7 +157,6 @@
   <strong>Camera</strong>
   <span id="status"></span>
   <span class="pill">Gesture: <span id="gestureText">—</span></span>
-  <span class="pill">Vol: <span id="volText">50%</span></span>
 </div>
 
 <div id="wrap">
@@ -177,6 +177,9 @@
       <button id="btnMirror">Mirror OFF</button>
       <button id="btnWake">Wake Lock OFF</button>
       <button id="btnStop">Stop</button>
+
+      <!-- MOVED HERE -->
+      <span class="pill">Vol: <span id="volText">50%</span></span>
     </div>
 
     <div class="row hint">
@@ -385,56 +388,43 @@ const VOL_COOLDOWN_MS = 120;
 let lastVolTick = 0;
 
 function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
-function clamp01(v){ return Math.max(0, Math.min(1, v)); }
 
-/* --------- UPDATED gestures ----------
-   - one: ONLY index extended
-   - three: index + middle + ring extended
-   - mini_love: "finger heart" heuristic (thumb tip close to index tip)
--------------------------------------- */
+/* UPDATED gestures:
+   - one: index only
+   - three: index+middle+ring
+   - mini_love: thumb tip near index tip (heuristic)
+*/
 function classifyGesture(lm){
   const wrist = lm[0];
 
   const tips = { thumb: lm[4], index: lm[8], middle: lm[12], ring: lm[16], pinky: lm[20] };
   const pips = { index: lm[6], middle: lm[10], ring: lm[14], pinky: lm[18], thumb: lm[3] };
-  const mcps = { index: lm[5], middle: lm[9], ring: lm[13], pinky: lm[17] };
+  const mcps = { index: lm[5], middle: lm[9] };
 
-  // extended tests (distance-based)
   const extIndex  = dist(tips.index, wrist)  > dist(pips.index, wrist)  * 1.05;
   const extMiddle = dist(tips.middle, wrist) > dist(pips.middle, wrist) * 1.05;
   const extRing   = dist(tips.ring, wrist)   > dist(pips.ring, wrist)   * 1.05;
   const extPinky  = dist(tips.pinky, wrist)  > dist(pips.pinky, wrist)  * 1.05;
 
-  // thumb extension (use index MCP as reference)
   const extThumb  = dist(tips.thumb, mcps.index) > dist(pips.thumb, mcps.index) * 1.03;
 
   const thumbOnly = extThumb && !extIndex && !extMiddle && !extRing && !extPinky;
 
-  // thumbs direction (screen y)
   const thumbUpCond   = thumbOnly && (tips.thumb.y < wrist.y - 0.05);
   const thumbDownCond = thumbOnly && (tips.thumb.y > wrist.y + 0.05);
 
-  // peace (index + middle)
   const peace = !extThumb && extIndex && extMiddle && !extRing && !extPinky;
+  const palm  = extIndex && extMiddle && extRing && extPinky;
 
-  // open palm (4 fingers at least)
-  const palm = extIndex && extMiddle && extRing && extPinky;
-
-  // ONE finger (index only)
-  const one = extIndex && !extMiddle && !extRing && !extPinky && !extThumb;
-
-  // THREE fingers (index + middle + ring) - thumb/pinky folded
+  const one   = extIndex && !extMiddle && !extRing && !extPinky && !extThumb;
   const three = extIndex && extMiddle && extRing && !extPinky && !extThumb;
 
-  // MINI LOVE / finger heart (heuristic):
-  // thumb tip near index tip, and neither index nor thumb is fully "palm open" style
-  // (this is not perfect, but works reasonably with good lighting/pose).
+  // mini love heuristic: thumb tip close to index tip (normalize by hand size)
   const dTI = dist(tips.thumb, tips.index);
-  const dNorm = dist(wrist, mcps.middle) || 1e-6; // normalize by hand size
-  const dScaled = dTI / dNorm;
+  const handScale = dist(wrist, mcps.middle) || 1e-6;
+  const dScaled = dTI / handScale;
   const miniLove = (dScaled < 0.55) && !palm && !peace && !thumbOnly && (extThumb || extIndex);
 
-  // Priority (avoid confusing miniLove with thumbs/one/three)
   if(thumbUpCond)   return "thumbs_up";
   if(thumbDownCond) return "thumbs_down";
   if(miniLove)      return "mini_love";
@@ -463,11 +453,11 @@ function setVolume(v){
   volText.textContent = volume + "%";
   save(LS.vol, volume);
 }
+function bumpVolume(dir){ setVolume(volume + dir * VOL_STEP); }
 
-function bumpVolume(dir){
-  setVolume(volume + dir * VOL_STEP);
-}
-
+/* =========================
+   Overlay mapping + drawing
+========================= */
 function getContainRect(){
   const cw = videoCard.clientWidth;
   const ch = videoCard.clientHeight;
@@ -541,7 +531,6 @@ function drawGestureBadge(mappedLandmarks, gestureCode){
   octx.restore();
 }
 
-/* circle-backed vol label */
 function drawVolCircleLabel(cx, cy, text){
   const r = 20;
   octx.save();
@@ -598,6 +587,15 @@ function drawVolumeBar(mappedLandmarks){
   octx.restore();
 }
 
+/* =========================
+   Hand style functions (must be after lineHue/dotHue vars exist)
+========================= */
+function lineColor(a=1){ return `hsla(${lineHue},100%,55%,${a})`; }
+function dotColor(a=1){  return `hsla(${dotHue},100%,55%,${a})`; }
+
+/* =========================
+   MediaPipe hands
+========================= */
 function initHands(){
   hands = new Hands({
     locateFile: (file)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
@@ -654,7 +652,6 @@ function initHands(){
 
     drawGestureBadge(mapped, lastGesture);
 
-    // Only show volume bar on thumbs up/down
     if(isThumb){
       drawVolumeBar(mapped);
     }
