@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Camera + Wake Lock + Remember + Gesture + Hand Style Sliders</title>
+
+<style>
+  :root { --bg:#111; --fg:#eee; --card:#181818; --line:#333; }
+  *{ box-sizing:border-box; }
+
+  body{
+    margin:0;
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+    background:var(--bg);
+    color:var(--fg);
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+  }
+
+  #topBar{
+    padding:10px 12px;
+    display:flex;
+    gap:10px;
+    align-items:center;
+    border-bottom:1px solid var(--line);
+    font-size:14px;
+    flex-wrap:wrap;
+  }
+
+  #status{ opacity:.85; }
+
+  #wrap{ padding:12px; display:flex; flex-direction:column; gap:12px; }
+
+  #videoCard{
+    background:#000;
+    border-radius:12px;
+    overflow:hidden;
+    border:1px solid #222;
+    position:relative;
+  }
+
+  video{
+    width:100%;
+    height:auto;
+    display:block;
+    background:#000;
+    transform-origin:center;
+  }
+
+  #overlay{
+    position:absolute;
+    inset:0;
+    width:100%;
+    height:100%;
+    pointer-events:none;
+  }
+
+  .mirror{ transform:scaleX(-1); }
+
+  .panel{
+    background:var(--card);
+    border:1px solid #222;
+    border-radius:12px;
+    padding:12px;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+  }
+
+  .row{
+    display:flex;
+    gap:10px;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+
+  label{
+    min-width:140px;
+    font-size:13px;
+    opacity:.95;
+  }
+
+  select{
+    flex:1;
+    min-width:200px;
+    padding:10px 12px;
+    border-radius:10px;
+    border:1px solid #444;
+    background:#111;
+    color:#fff;
+    font-size:13px;
+  }
+
+  button{
+    height:38px;
+    padding:0 14px;
+    border-radius:10px;
+    border:1px solid #444;
+    background:#2a2a2a;
+    color:#fff;
+    font-size:13px;
+    cursor:pointer;
+  }
+
+  button:hover{ background:#343434; }
+  button:active{ background:#3f3f3f; }
+
+  .active{
+    background:#0a6cff !important;
+    border-color:#0a6cff !important;
+  }
+
+  .pill{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding:6px 10px;
+    border:1px solid #2a2a2a;
+    border-radius:999px;
+    background:#141414;
+    font-size:12px;
+    opacity:.95;
+  }
+
+  #gestureText{ font-weight:700; letter-spacing:.2px; }
+
+  input[type="range"]{ flex:1; min-width:190px; }
+  .valueLabel{
+    min-width:110px;
+    text-align:right;
+    font-size:12px;
+    opacity:.9;
+  }
+
+  .divider{
+    height:1px;
+    background:#2a2a2a;
+    margin:6px 0;
+  }
+
+  .hint{
+    opacity:.85;
+    font-size:12px;
+  }
+
+  /* Color preview swatch */
+  .swatch{
+    width:18px;
+    height:18px;
+    border-radius:6px;
+    border:1px solid #3a3a3a;
+    background:#fff;
+    flex:0 0 auto;
+  }
+</style>
+</head>
+
+<body>
+
+<div id="topBar">
+  <strong>Camera</strong>
+  <span id="status"></span>
+  <span class="pill">Gesture: <span id="gestureText">—</span></span>
+</div>
+
+<div id="wrap">
+
+  <div id="videoCard">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="overlay"></canvas>
+  </div>
+
+  <div class="panel">
+    <div class="row">
+      <label>Camera</label>
+      <select id="cameraSelect"></select>
+    </div>
+
+    <div class="row">
+      <button id="btnRefresh">Refresh</button>
+      <button id="btnFlash">Flash OFF</button>
+      <button id="btnMirror">Mirror OFF</button>
+      <button id="btnWake">Wake Lock OFF</button>
+      <button id="btnStop">Stop</button>
+    </div>
+
+    <!-- moved here: gesture hint below camera/status row -->
+    <div class="row hint">
+      ✋ Open Palm • ✊ Fist • 👍 Thumbs Up • ✌️ Peace (simple heuristics)
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- Hand style controls -->
+    <div class="row">
+      <label>Line Color Hue</label>
+      <span class="swatch" id="lineSwatch"></span>
+      <input id="lineHue" type="range" min="0" max="360">
+      <span class="valueLabel" id="lineHueV"></span>
+    </div>
+
+    <div class="row">
+      <label>Dot Color Hue</label>
+      <span class="swatch" id="dotSwatch"></span>
+      <input id="dotHue" type="range" min="0" max="360">
+      <span class="valueLabel" id="dotHueV"></span>
+    </div>
+
+    <div class="row">
+      <label>Line Thickness</label>
+      <input id="lineSize" type="range" min="1" max="10" step="1">
+      <span class="valueLabel" id="lineSizeV"></span>
+    </div>
+
+    <div class="row">
+      <label>Dot Size</label>
+      <input id="dotSize" type="range" min="1" max="12" step="1">
+      <span class="valueLabel" id="dotSizeV"></span>
+    </div>
+
+  </div>
+</div>
+
+<!-- MediaPipe Hands -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+<script>
+/* =========================
+   LocalStorage helpers
+========================= */
+const LS = {
+  camId:     "cam_last_deviceId",
+  mirror:    "cam_mirror",
+  wake:      "cam_wakelock",
+  torch:     "cam_torch",
+  lineHue:   "hand_line_hue",
+  dotHue:    "hand_dot_hue",
+  lineSize:  "hand_line_size",
+  dotSize:   "hand_dot_size"
+};
+const save = (k,v)=>{ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} };
+const load = (k,def)=>{ try{ const v = localStorage.getItem(k); return v!==null ? JSON.parse(v) : def; }catch(e){ return def; } };
+
+/* =========================
+   Elements / state
+========================= */
+const video = document.getElementById("video");
+const overlay = document.getElementById("overlay");
+const octx = overlay.getContext("2d");
+const statusEl = document.getElementById("status");
+const gestureText = document.getElementById("gestureText");
+const cameraSelect = document.getElementById("cameraSelect");
+
+const btnRefresh = document.getElementById("btnRefresh");
+const btnFlash   = document.getElementById("btnFlash");
+const btnMirror  = document.getElementById("btnMirror");
+const btnWake    = document.getElementById("btnWake");
+const btnStop    = document.getElementById("btnStop");
+
+// sliders
+const lineHueS = document.getElementById("lineHue");
+const dotHueS  = document.getElementById("dotHue");
+const lineSizeS= document.getElementById("lineSize");
+const dotSizeS = document.getElementById("dotSize");
+
+const lineHueV = document.getElementById("lineHueV");
+const dotHueV  = document.getElementById("dotHueV");
+const lineSizeV= document.getElementById("lineSizeV");
+const dotSizeV = document.getElementById("dotSizeV");
+
+// color preview swatches
+const lineSwatch = document.getElementById("lineSwatch");
+const dotSwatch  = document.getElementById("dotSwatch");
+
+let stream = null;
+let track  = null;
+
+let torchOn    = load(LS.torch, false);
+let mirrorOn   = load(LS.mirror, false);
+let wakeWanted = load(LS.wake, true); // default ON
+
+// Hand style saved defaults
+let lineHue  = load(LS.lineHue, 190);
+let dotHue   = load(LS.dotHue,  20);
+let lineSize = load(LS.lineSize, 3);
+let dotSize  = load(LS.dotSize,  4);
+
+let wakeLock = null;
+
+function setStatus(msg){ statusEl.textContent = msg; }
+
+function applyMirrorUI(){
+  video.classList.toggle("mirror", mirrorOn);
+  overlay.classList.toggle("mirror", mirrorOn);
+  btnMirror.textContent = mirrorOn ? "Mirror ON" : "Mirror OFF";
+  btnMirror.classList.toggle("active", mirrorOn);
+}
+
+function applyWakeUI(isOn){
+  btnWake.textContent = isOn ? "Wake Lock ON" : "Wake Lock OFF";
+  btnWake.classList.toggle("active", isOn);
+}
+
+function applyTorchUI(isOn){
+  btnFlash.textContent = isOn ? "Flash ON" : "Flash OFF";
+  btnFlash.classList.toggle("active", isOn);
+}
+
+/* =========================
+   Hand style helpers
+========================= */
+function lineColor(alpha=1){ return `hsla(${lineHue}, 100%, 55%, ${alpha})`; }
+function dotColor(alpha=1){  return `hsla(${dotHue},  100%, 55%, ${alpha})`; }
+
+function updateSwatches(){
+  lineSwatch.style.background = lineColor(1);
+  dotSwatch.style.background  = dotColor(1);
+}
+
+function setSliderUI(){
+  lineHueS.value = lineHue;
+  dotHueS.value  = dotHue;
+  lineSizeS.value= lineSize;
+  dotSizeS.value = dotSize;
+
+  lineHueV.textContent = `${lineHue}°`;
+  dotHueV.textContent  = `${dotHue}°`;
+  lineSizeV.textContent= `${lineSize}px`;
+  dotSizeV.textContent = `${dotSize}px`;
+
+  updateSwatches();
+}
+setSliderUI();
+
+lineHueS.oninput = (e)=>{
+  lineHue = Number(e.target.value);
+  lineHueV.textContent = `${lineHue}°`;
+  save(LS.lineHue, lineHue);
+  updateSwatches();
+};
+dotHueS.oninput = (e)=>{
+  dotHue = Number(e.target.value);
+  dotHueV.textContent = `${dotHue}°`;
+  save(LS.dotHue, dotHue);
+  updateSwatches();
+};
+lineSizeS.oninput = (e)=>{
+  lineSize = Number(e.target.value);
+  lineSizeV.textContent = `${lineSize}px`;
+  save(LS.lineSize, lineSize);
+};
+dotSizeS.oninput = (e)=>{
+  dotSize = Number(e.target.value);
+  dotSizeV.textContent = `${dotSize}px`;
+  save(LS.dotSize, dotSize);
+};
+
+/* =========================
+   Wake Lock
+========================= */
+async function requestWakeLock(){
+  if(!("wakeLock" in navigator)){
+    applyWakeUI(false);
+    return false;
+  }
+  try{
+    wakeLock = await navigator.wakeLock.request("screen");
+    wakeLock.addEventListener("release", ()=> applyWakeUI(false));
+    applyWakeUI(true);
+    return true;
+  }catch(err){
+    console.warn("WakeLock request failed:", err);
+    applyWakeUI(false);
+    return false;
+  }
+}
+
+async function releaseWakeLock(){
+  try{
+    if(wakeLock){
+      await wakeLock.release();
+      wakeLock = null;
+    }
+  }catch(e){}
+  applyWakeUI(false);
+}
+
+document.addEventListener("visibilitychange", async ()=>{
+  if(document.visibilityState === "visible" && wakeWanted){
+    await requestWakeLock();
+  }
+});
+
+/* =========================
+   Torch / Flash
+========================= */
+async function setTorch(on){
+  if(!track){
+    torchOn = false;
+    save(LS.torch, torchOn);
+    applyTorchUI(false);
+    return false;
+  }
+  const caps = track.getCapabilities?.();
+  if(!caps || !("torch" in caps)){
+    torchOn = false;
+    save(LS.torch, torchOn);
+    applyTorchUI(false);
+    alert("Flash not supported on this device/camera");
+    return false;
+  }
+  try{
+    await track.applyConstraints({ advanced:[{ torch: !!on }] });
+    torchOn = !!on;
+    save(LS.torch, torchOn);
+    applyTorchUI(torchOn);
+    return true;
+  }catch(err){
+    console.warn("Torch failed:", err);
+    torchOn = false;
+    save(LS.torch, torchOn);
+    applyTorchUI(false);
+    alert("Flash failed: " + err.name);
+    return false;
+  }
+}
+
+/* =========================
+   Gesture Detection (MediaPipe Hands)
+========================= */
+let hands = null;
+let handsReady = false;
+let lastGesture = "—";
+let lastGestureTs = 0;
+
+function dist(a,b){
+  const dx=a.x-b.x, dy=a.y-b.y;
+  return Math.hypot(dx,dy);
+}
+
+function classifyGesture(lm){
+  const wrist = lm[0];
+  const tips = { thumb: lm[4], index: lm[8], middle: lm[12], ring: lm[16], pinky: lm[20] };
+  const pips = { index: lm[6], middle: lm[10], ring: lm[14], pinky: lm[18], thumb: lm[3] };
+  const indexMCP = lm[5];
+
+  const extIndex  = dist(tips.index, wrist)  > dist(pips.index, wrist)  * 1.05;
+  const extMiddle = dist(tips.middle, wrist) > dist(pips.middle, wrist) * 1.05;
+  const extRing   = dist(tips.ring, wrist)   > dist(pips.ring, wrist)   * 1.05;
+  const extPinky  = dist(tips.pinky, wrist)  > dist(pips.pinky, wrist)  * 1.05;
+  const extThumb  = dist(tips.thumb, indexMCP) > dist(pips.thumb, indexMCP) * 1.03;
+
+  const extCount = [extThumb, extIndex, extMiddle, extRing, extPinky].filter(Boolean).length;
+
+  const thumbUp = extThumb && !extIndex && !extMiddle && !extRing && !extPinky && (tips.thumb.y < wrist.y - 0.05);
+  const peace = !extThumb && extIndex && extMiddle && !extRing && !extPinky;
+  const palm = extCount >= 4 && extIndex && extMiddle && extRing && extPinky;
+  const fist = extCount <= 1 && !extIndex && !extMiddle && !extRing && !extPinky;
+
+  if(thumbUp) return "👍 Thumbs Up";
+  if(peace)   return "✌️ Peace";
+  if(palm)    return "✋ Open Palm";
+  if(fist)    return "✊ Fist";
+  return "—";
+}
+
+function initHands(){
+  hands = new Hands({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  });
+
+  hands.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.6,
+    minTrackingConfidence: 0.6
+  });
+
+  hands.onResults((results) => {
+    // resize overlay to match video frame pixels
+    if(video.videoWidth && video.videoHeight){
+      if(overlay.width !== video.videoWidth || overlay.height !== video.videoHeight){
+        overlay.width = video.videoWidth;
+        overlay.height = video.videoHeight;
+      }
+    }
+
+    octx.clearRect(0,0,overlay.width,overlay.height);
+
+    if(results.multiHandLandmarks && results.multiHandLandmarks.length){
+      const lm = results.multiHandLandmarks[0];
+
+      drawConnectors(octx, lm, HAND_CONNECTIONS, {
+        color: lineColor(0.95),
+        lineWidth: lineSize
+      });
+
+      drawLandmarks(octx, lm, {
+        color: dotColor(1),
+        lineWidth: 1,
+        radius: dotSize
+      });
+
+      const g = classifyGesture(lm);
+
+      const now = performance.now();
+      if(g !== "—"){
+        if(g !== lastGesture){
+          lastGesture = g;
+          lastGestureTs = now;
+        }else{
+          lastGestureTs = now;
+        }
+      }else{
+        if(now - lastGestureTs > 400) lastGesture = "—";
+      }
+    }else{
+      const now = performance.now();
+      if(now - lastGestureTs > 400) lastGesture = "—";
+    }
+
+    gestureText.textContent = lastGesture;
+  });
+
+  handsReady = true;
+}
+
+let gestureLoopRunning = false;
+async function gestureLoop(){
+  if(!gestureLoopRunning) return;
+
+  if(video.readyState >= 2 && video.videoWidth && video.videoHeight && handsReady){
+    try{ await hands.send({ image: video }); }catch(e){}
+  }
+  requestAnimationFrame(gestureLoop);
+}
+
+function startGesture(){
+  if(!hands) initHands();
+  gestureLoopRunning = true;
+  requestAnimationFrame(gestureLoop);
+}
+
+function stopGesture(){
+  gestureLoopRunning = false;
+  octx.clearRect(0,0,overlay.width,overlay.height);
+  gestureText.textContent = "—";
+  lastGesture = "—";
+}
+
+/* =========================
+   Camera
+========================= */
+function stopCamera(){
+  stopGesture();
+  if(stream){
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+    track = null;
+  }
+  video.srcObject = null;
+  setStatus("Stopped");
+  applyTorchUI(false);
+}
+
+async function startCamera(deviceId){
+  try{
+    stopCamera();
+    setStatus("Starting camera…");
+
+    const constraints = {
+      video:{
+        deviceId: deviceId ? { exact: deviceId } : undefined,
+        facingMode: "environment",
+        width:{ ideal:1920 },
+        height:{ ideal:1080 }
+      },
+      audio:false
+    };
+
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+    video.srcObject = stream;
+    track = stream.getVideoTracks()[0];
+
+    if(deviceId) save(LS.camId, deviceId);
+
+    applyMirrorUI();
+
+    if(torchOn) await setTorch(true);
+    else applyTorchUI(false);
+
+    setStatus("Camera running ✅");
+
+    if(wakeWanted) await requestWakeLock();
+    else await releaseWakeLock();
+
+    startGesture();
+  }catch(err){
+    console.error(err);
+    setStatus("Camera error: " + err.name);
+    alert("Camera error: " + err.name);
+  }
+}
+
+async function listCameras(){
+  setStatus("Listing cameras…");
+
+  try{
+    const tmp = await navigator.mediaDevices.getUserMedia({video:true});
+    tmp.getTracks().forEach(t=>t.stop());
+  }catch(e){}
+
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const cams = devices.filter(d => d.kind === "videoinput");
+
+  cameraSelect.innerHTML = "";
+  cams.forEach((cam,i)=>{
+    const opt = document.createElement("option");
+    opt.value = cam.deviceId;
+    opt.textContent = cam.label || `Camera ${i+1}`;
+    cameraSelect.appendChild(opt);
+  });
+
+  cameraSelect.onchange = () => startCamera(cameraSelect.value);
+
+  if(!cams.length){
+    setStatus("No camera found");
+    return;
+  }
+
+  const lastId = load(LS.camId, null);
+  let preferred = cams[0];
+
+  if(lastId && cams.some(c => c.deviceId === lastId)){
+    preferred = cams.find(c => c.deviceId === lastId);
+  }else{
+    const back = cams.find(c => (c.label||"").toLowerCase().match(/back|rear|environment/));
+    if(back) preferred = back;
+  }
+
+  cameraSelect.value = preferred.deviceId;
+  await startCamera(preferred.deviceId);
+}
+
+/* =========================
+   Buttons
+========================= */
+btnRefresh.onclick = () => listCameras();
+
+btnStop.onclick = async () => {
+  stopCamera();
+  await releaseWakeLock();
+};
+
+btnMirror.onclick = () => {
+  mirrorOn = !mirrorOn;
+  save(LS.mirror, mirrorOn);
+  applyMirrorUI();
+};
+
+btnFlash.onclick = async () => {
+  await setTorch(!torchOn);
+};
+
+btnWake.onclick = async () => {
+  wakeWanted = !wakeWanted;
+  save(LS.wake, wakeWanted);
+
+  if(wakeWanted) await requestWakeLock();
+  else await releaseWakeLock();
+};
+
+/* =========================
+   Init
+========================= */
+applyMirrorUI();
+applyTorchUI(torchOn);
+applyWakeUI(false);
+updateSwatches();
+
+(async function init(){
+  if(!navigator.mediaDevices?.getUserMedia){
+    alert("Camera API not supported");
+    return;
+  }
+  await listCameras();
+})();
+</script>
+
+</body>
+</html>
